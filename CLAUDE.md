@@ -32,7 +32,9 @@ This is a **library subproject** within the larger SlugKit repository (`libs/use
 
 - **GeoMiddlewareFactory** (`geo/include/slugkit/geo/middleware.hpp`, `geo/src/slugkit/geo/middleware.cpp`) - HTTP middleware factory for automatic GeoIP resolution
   - Component name: `"geoip-middleware"`
-  - Extracts IP from request header (default: `x-real-ip`, configurable)
+  - Extracts IP from request header (default: `x-real-ip`, configurable to `x-forwarded-for`)
+  - Supports X-Forwarded-For parsing with trusted proxy networks (CIDR notation)
+  - Recursive mode: walks backwards through X-Forwarded-For, skipping trusted proxies (similar to nginx `real_ip_recursive`)
   - Supports multiple resolver components with fallback chain (tries resolvers in order until one succeeds)
   - Sets geo information to request context variables for use in handlers
   - Reference to shared `GeoMiddlewareConfig` for context variable naming
@@ -93,7 +95,13 @@ components:
   # Middleware factory
   geoip-middleware:
     config-name: geoip-middleware-config  # optional, defaults to geoip-middleware-config
-    ip-header: x-real-ip                  # optional, defaults to x-real-ip
+    ip-header: x-forwarded-for            # optional, defaults to x-real-ip
+    recursive: true                       # optional, defaults to false
+    trusted-proxies:                      # optional, defaults to []
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 2001:db8::/32
     resolvers:
       - maxmind-db-lookup                 # List of resolver components (tries in order)
       # - some-online-service             # Fallback to online service if MaxMind fails
@@ -106,6 +114,12 @@ server:
 
 **Middleware behaviour:**
 - Extracts IP address from specified header (default: `x-real-ip`)
+- When `recursive: true` with `trusted-proxies` configured:
+  - Parses comma-separated X-Forwarded-For header
+  - Walks backwards through IP list, skipping trusted proxy IPs
+  - Returns the first untrusted IP (real client IP)
+  - Supports both IPv4 and IPv6 CIDR notation
+- When `recursive: false` or no trusted proxies: returns the first IP from the header
 - Tries each resolver in order until one returns a result
 - Sets resolved geo data to request context variables
 - Handlers can access the data via `context.GetData<T>(variable_name)`

@@ -53,8 +53,14 @@ components:
 ```yaml
 components:
   geoip-middleware:
-    config-name: geoip-middleware-config  # optional
-    ip-header: x-real-ip                  # optional, default: x-real-ip
+    config-name: geoip-middleware-config  # optional, default: geoip-middleware-config
+    ip-header: x-forwarded-for            # optional, default: x-real-ip
+    recursive: true                       # optional, default: false
+    trusted-proxies:                      # optional, default: []
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 2001:db8::/32
     resolvers:
       - maxmind-db-lookup
       # - fallback-resolver  # Optional fallback chain
@@ -87,10 +93,70 @@ void MyHandler::HandleRequestThrow(
 ```
 
 **Features:**
-- Supports multiple resolver components with automatic fallback
-- Configurable IP header extraction
-- Customisable context variable names
-- No handler code changes needed - data available via request context
+- **X-Forwarded-For parsing** with trusted proxy support (similar to nginx `real_ip_recursive`)
+- **Recursive IP extraction**: Walks backwards through X-Forwarded-For, skipping trusted proxies
+- **CIDR notation**: Supports both IPv4 and IPv6 trusted proxy networks
+- **Multiple resolver fallback**: Tries resolvers in order until one succeeds
+- **Configurable headers**: Extract IP from `x-real-ip`, `x-forwarded-for`, or custom header
+- **Customisable context variables**: Configure the names of request context variables
+- **Zero handler changes**: Data automatically available via request context
+
+### Nginx Configuration
+
+#### Option 1: Using X-Forwarded-For with Middleware Parsing
+
+Let nginx pass through X-Forwarded-For, and configure the middleware to handle trusted proxies:
+
+```nginx
+server {
+    location / {
+        proxy_pass http://backend;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+```
+
+Then configure the middleware:
+```yaml
+geoip-middleware:
+  ip-header: x-forwarded-for
+  recursive: true
+  trusted-proxies:
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+```
+
+#### Option 2: Let Nginx Handle Real IP
+
+Let nginx resolve the real IP and pass it via X-Real-IP:
+
+```nginx
+http {
+    # Define trusted proxy addresses
+    set_real_ip_from 10.0.0.0/8;
+    set_real_ip_from 172.16.0.0/12;
+    set_real_ip_from 192.168.0.0/16;
+
+    real_ip_header X-Forwarded-For;
+    real_ip_recursive on;
+
+    server {
+        location / {
+            proxy_pass http://backend;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+    }
+}
+```
+
+Then configure the middleware:
+```yaml
+geoip-middleware:
+  ip-header: x-real-ip  # default
+```
+
+**Security:** Only add trusted proxy IPs to prevent IP spoofing. Use the same CIDR ranges in both nginx and middleware configurations.
 
 ## Extensibility
 

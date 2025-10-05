@@ -4,6 +4,7 @@
 #include <slugkit/geo/lookup_component_base.hpp>
 
 #include <userver/server/middlewares/http_middleware_base.hpp>
+#include <userver/utils/fast_pimpl.hpp>
 
 namespace slugkit::geo {
 
@@ -27,6 +28,7 @@ public:
         const userver::components::ComponentConfig& config,
         const userver::components::ComponentContext& context
     );
+    ~GeoMiddlewareFactory() override;
 
     [[nodiscard]] auto Create(
         const userver::server::handlers::HttpHandlerBase& handler,
@@ -36,9 +38,10 @@ public:
     static auto GetStaticConfigSchema() -> userver::yaml_config::Schema;
 
 private:
-    const GeoMiddlewareConfig& context_config_;
-    std::vector<LookupComponentBase const*> geoip_resolvers_;
-    std::string ip_header_;
+    constexpr static auto kImplSize = 96UL;
+    constexpr static auto kImplAlign = 8UL;
+    struct Impl;
+    userver::utils::FastPimpl<Impl, kImplSize, kImplAlign> impl_;
 };
 
 }  // namespace slugkit::geo
