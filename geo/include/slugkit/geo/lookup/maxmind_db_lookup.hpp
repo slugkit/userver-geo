@@ -18,7 +18,7 @@ public:
     static auto GetStaticConfigSchema() -> userver::yaml_config::Schema;
 
 private:
-    constexpr static auto kImplSize = 464UL;
+    constexpr static auto kImplSize = 496UL;
     constexpr static auto kImplAlign = 8UL;
     struct Impl;
     userver::utils::FastPimpl<Impl, kImplSize, kImplAlign> impl_;
