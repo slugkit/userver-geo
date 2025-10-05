@@ -136,9 +136,15 @@ private:
         context.SetData(context_config_.config.lookup_result_context, lookup_result);
         context.SetData(context_config_.config.country_code_context, lookup_result.country_code);
         context.SetData(context_config_.config.country_name_context, lookup_result.country_name);
-        context.SetData(context_config_.config.city_name_context, lookup_result.city_name);
-        context.SetData(context_config_.config.time_zone_context, lookup_result.time_zone);
-        context.SetData(context_config_.config.coordinates_context, lookup_result.coordinates);
+        if (lookup_result.city_name) {
+            context.SetData(context_config_.config.city_name_context, lookup_result.city_name.value());
+        }
+        if (lookup_result.time_zone) {
+            context.SetData(context_config_.config.time_zone_context, lookup_result.time_zone.value());
+        }
+        if (lookup_result.coordinates) {
+            context.SetData(context_config_.config.coordinates_context, lookup_result.coordinates.value());
+        }
     }
 
 private:
@@ -203,8 +209,8 @@ GeoMiddlewareFactory::GeoMiddlewareFactory(
 GeoMiddlewareFactory::~GeoMiddlewareFactory() = default;
 
 auto GeoMiddlewareFactory::Create(
-    const userver::server::handlers::HttpHandlerBase& handler,
-    userver::yaml_config::YamlConfig middleware_config
+    [[maybe_unused]] const userver::server::handlers::HttpHandlerBase& handler,
+    [[maybe_unused]] userver::yaml_config::YamlConfig middleware_config
 ) const -> std::unique_ptr<userver::server::middlewares::HttpMiddlewareBase> {
     return std::make_unique<GeoMiddleware>(
         impl_->context_config_, impl_->resolvers_, impl_->ip_header_, impl_->trusted_proxies_, impl_->recursive_

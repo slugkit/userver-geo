@@ -17,6 +17,9 @@ set(${PROJECT_NAME}_SRC
     src/slugkit/geo/context_config.cpp
 
     src/slugkit/geo/lookup/maxmind_db_lookup.cpp
+    
+    src/slugkit/geo/endpoints/reload_maxmind_db.cpp
+    src/slugkit/geo/endpoints/client_geo.cpp
 )
 
 set(${PROJECT_NAME}_HEADERS
@@ -25,6 +28,9 @@ set(${PROJECT_NAME}_HEADERS
 
     include/slugkit/geo/lookup/lookup_component_base.hpp
     include/slugkit/geo/lookup/maxmind_db_lookup.hpp
+
+    include/slugkit/geo/endpoints/reload_maxmind_db.hpp
+    include/slugkit/geo/endpoints/client_geo.hpp
 )
 
 add_library(${PROJECT_NAME} STATIC ${${PROJECT_NAME}_SRC} ${${PROJECT_NAME}_HEADERS})

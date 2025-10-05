@@ -32,6 +32,7 @@ struct MaxmindDb::Impl {
     }
 
     auto Reload() -> void {
+        LOG_INFO() << "Reloading MaxMind database from file: " << database_file_;
         std::unique_lock lock(mutex_);
         MMDB_s new_database = {};
         auto status = MMDB_open(database_file_.c_str(), MMDB_MODE_MMAP, &new_database);
@@ -39,6 +40,7 @@ struct MaxmindDb::Impl {
             LOG_ERROR() << "Failed to open database file: " << database_file_;
             return;
         }
+        LOG_INFO() << "MaxMind database reloaded successfully";
         std::swap(database_, new_database);
     }
 
