@@ -29,6 +29,7 @@ public:
         : userver::components::ComponentBase(config, context) {
     }
 
+    // TODO Add lookup deadline
     [[nodiscard]] virtual auto Lookup(const std::string& ip) const -> std::optional<LookupResult> = 0;
 };
 

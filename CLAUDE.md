@@ -15,12 +15,29 @@ This is a **library subproject** within the larger SlugKit repository (`libs/use
 - **LookupComponentBase** (`geo/include/slugkit/geo/lookup_component_base.hpp`) - Abstract base class defining the GeoIP lookup interface
   - Returns `LookupResult` with country code/name, city name, time zone, and coordinates
   - Pure virtual `Lookup(const std::string& ip)` method
+  - TODO: Add lookup deadline support
 
 - **MaxmindDbLookup** (`geo/include/slugkit/geo/maxmind_db_lookup.hpp`, `geo/src/slugkit/geo/maxmind_db_lookup.cpp`) - Concrete implementation using MaxMind databases
   - Component name: `"maxmind-db-lookup"`
   - Uses FastPimpl pattern to hide MaxMind implementation details
   - Memory-mapped database access via `MMDB_MODE_MMAP`
   - Configuration requires `database-dir` and `database-file` paths
+
+### Middleware Components
+
+- **GeoMiddlewareConfig** (`geo/include/slugkit/geo/context_config.hpp`) - Configuration component for context variable names
+  - Component name: `"geoip-middleware-config"`
+  - Configures the names of request context variables that will be set by the middleware
+  - Default variable names: `lookup_result`, `country_code`, `country_name`, `city_name`, `time_zone`, `coordinates`
+
+- **GeoMiddlewareFactory** (`geo/include/slugkit/geo/middleware.hpp`, `geo/src/slugkit/geo/middleware.cpp`) - HTTP middleware factory for automatic GeoIP resolution
+  - Component name: `"geoip-middleware"`
+  - Extracts IP from request header (default: `x-real-ip`, configurable to `x-forwarded-for`)
+  - Supports X-Forwarded-For parsing with trusted proxy networks (CIDR notation)
+  - Recursive mode: walks backwards through X-Forwarded-For, skipping trusted proxies (similar to nginx `real_ip_recursive`)
+  - Supports multiple resolver components with fallback chain (tries resolvers in order until one succeeds)
+  - Sets geo information to request context variables for use in handlers
+  - Reference to shared `GeoMiddlewareConfig` for context variable naming
 
 ### Dependencies
 
@@ -49,7 +66,9 @@ This library is **not standalone** - it must be built as part of a parent projec
 
 ## Component Configuration
 
-When using MaxmindDbLookup in a userver service, configure it in YAML:
+### Basic Lookup Component
+
+Configure MaxmindDbLookup in YAML:
 
 ```yaml
 components:
@@ -58,10 +77,52 @@ components:
     database-file: GeoLite2-City.mmdb
 ```
 
-The component will:
-1. Open the MaxMind database file on initialisation
-2. Keep it memory-mapped for fast lookups
-3. Close the database on component destruction
+### Middleware Setup
+
+To use automatic GeoIP resolution via middleware:
+
+```yaml
+components:
+  # Optional: Configure context variable names (uses defaults if not specified)
+  geoip-middleware-config:
+    lookup_result_context: geo_lookup     # default: lookup_result
+    country_code_context: country_code    # default: country_code
+    country_name_context: country_name    # default: country_name
+    city_name_context: city_name          # default: city_name
+    time_zone_context: time_zone          # default: time_zone
+    coordinates_context: coordinates      # default: coordinates
+
+  # Middleware factory
+  geoip-middleware:
+    config-name: geoip-middleware-config  # optional, defaults to geoip-middleware-config
+    ip-header: x-forwarded-for            # optional, defaults to x-real-ip
+    recursive: true                       # optional, defaults to false
+    trusted-proxies:                      # optional, defaults to []
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 2001:db8::/32
+    resolvers:
+      - maxmind-db-lookup                 # List of resolver components (tries in order)
+      # - some-online-service             # Fallback to online service if MaxMind fails
+
+# Apply middleware to server
+server:
+  middlewares:
+    - geoip-middleware
+```
+
+**Middleware behaviour:**
+- Extracts IP address from specified header (default: `x-real-ip`)
+- When `recursive: true` with `trusted-proxies` configured:
+  - Parses comma-separated X-Forwarded-For header
+  - Walks backwards through IP list, skipping trusted proxy IPs
+  - Returns the first untrusted IP (real client IP)
+  - Supports both IPv4 and IPv6 CIDR notation
+- When `recursive: false` or no trusted proxies: returns the first IP from the header
+- Tries each resolver in order until one returns a result
+- Sets resolved geo data to request context variables
+- Handlers can access the data via `context.GetData<T>(variable_name)`
 
 ## Lookup Result Structure
 
