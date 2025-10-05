@@ -12,15 +12,17 @@ This is a **library subproject** within the larger SlugKit repository (`libs/use
 
 ### Core Components
 
-- **LookupComponentBase** (`geo/include/slugkit/geo/lookup_component_base.hpp`) - Abstract base class defining the GeoIP lookup interface
-  - Returns `LookupResult` with country code/name, city name, time zone, and coordinates
+- **lookup::ComponentBase** (`geo/include/slugkit/geo/lookup/lookup_component_base.hpp`) - Abstract base class defining the GeoIP lookup interface
+  - Returns `lookup::LookupResult` with country code/name, city name, time zone, and coordinates
   - Pure virtual `Lookup(const std::string& ip)` method
   - TODO: Add lookup deadline support
 
-- **MaxmindDbLookup** (`geo/include/slugkit/geo/maxmind_db_lookup.hpp`, `geo/src/slugkit/geo/maxmind_db_lookup.cpp`) - Concrete implementation using MaxMind databases
+- **lookup::MaxmindDb** (`geo/include/slugkit/geo/lookup/maxmind_db_lookup.hpp`, `geo/src/slugkit/geo/lookup/maxmind_db_lookup.cpp`) - Concrete implementation using MaxMind databases
   - Component name: `"maxmind-db-lookup"`
   - Uses FastPimpl pattern to hide MaxMind implementation details
   - Memory-mapped database access via `MMDB_MODE_MMAP`
+  - Thread-safe with `engine::SharedMutex`: shared locks for reads, exclusive lock for reload
+  - Hot reload support via `Reload()` method - swaps database without service restart
   - Configuration requires `database-dir` and `database-file` paths
 
 ### Middleware Components
@@ -32,18 +34,43 @@ This is a **library subproject** within the larger SlugKit repository (`libs/use
 
 - **GeoMiddlewareFactory** (`geo/include/slugkit/geo/middleware.hpp`, `geo/src/slugkit/geo/middleware.cpp`) - HTTP middleware factory for automatic GeoIP resolution
   - Component name: `"geoip-middleware"`
+  - Uses FastPimpl pattern to hide implementation (variant types for IP networks)
   - Extracts IP from request header (default: `x-real-ip`, configurable to `x-forwarded-for`)
-  - Supports X-Forwarded-For parsing with trusted proxy networks (CIDR notation)
+  - Supports X-Forwarded-For parsing with trusted proxy networks (CIDR notation via userver `utils::ip`)
   - Recursive mode: walks backwards through X-Forwarded-For, skipping trusted proxies (similar to nginx `real_ip_recursive`)
   - Supports multiple resolver components with fallback chain (tries resolvers in order until one succeeds)
   - Sets geo information to request context variables for use in handlers
   - Reference to shared `GeoMiddlewareConfig` for context variable naming
 
+### Endpoint Components
+
+- **endpoints::ReloadMaxmindDb** (`geo/include/slugkit/geo/endpoints/reload_maxmind_db.hpp`) - Admin endpoint for hot database reload
+  - Handler name: `"handler-reload-maxmind-db"`
+  - Triggers `MaxmindDb::Reload()` method
+  - Typically POST endpoint on internal/admin listener
+  - Returns "OK" on success
+  - Used by cron jobs after database updates
+
+- **endpoints::ClientGeoHandler** (`geo/include/slugkit/geo/endpoints/client_geo.hpp`) - Debug endpoint returning client geo info
+  - Handler name: `"handler-client-geo"`
+  - Reads `LookupResult` from request context (set by middleware)
+  - Returns JSON with geo information
+  - Useful for testing middleware configuration
+  - Not recommended for production use (clients should not see their own geo data typically)
+
 ### Dependencies
 
 - **userver::core** - Component framework and utilities
+- **userver::universal** - For `utils::ip` (IP address and network types)
 - **libmaxminddb** - MaxMind database reader (fetched via CMake FetchContent from GitHub)
 - Expects `/userver/cmake` to be in CMAKE_PREFIX_PATH (configured in parent project)
+
+### Data Types
+
+- **lookup::LookupResult** (`geo/include/slugkit/geo/lookup/result.hpp`) - GeoIP lookup result
+  - Serialisation/parsing support for userver formats (JSON, etc.)
+  - Contains: country_code, country_name, optional city_name, time_zone, coordinates
+  - Coordinates struct with latitude/longitude (doubles)
 
 ## Build System
 
@@ -58,11 +85,40 @@ This is a **library subproject** within the larger SlugKit repository (`libs/use
 **geo/CMakeLists.txt:**
 - Fetches libmaxminddb from GitHub (main branch)
 - Builds static library `slugkit-geo`
+- Source files organised in subdirectories:
+  - `src/slugkit/geo/lookup/` - Lookup components
+  - `src/slugkit/geo/endpoints/` - HTTP handlers
+  - `src/slugkit/geo/` - Middleware and config
 - Links against `userver::core` and `maxminddb`
+
+**cmake/GeoIp.cmake:**
+- Module for downloading and managing GeoIP databases
+- Functions:
+  - `get_geoip_update_tool_bin()` - Downloads geoipupdate binary for current platform
+  - `download_geoip_databases(config_file, database_dir)` - Downloads databases using geoipupdate
+  - `configure_geoip_environment_script(input, output)` - Configures environment scripts with paths
+- Auto-detects platform (Darwin/Linux, arm64/amd64)
+- Skips download if databases are less than 1 day old
 
 ### Building
 
 This library is **not standalone** - it must be built as part of a parent project that has userver configured. The parent project's build system (e.g., `make build-in-docker` from the root SlugKit repository) handles building this library.
+
+### Database Management Scripts
+
+**scripts/update_databases.sh:**
+- Checks if database files are older than 1 day
+- Runs geoipupdate to download new databases
+- Triggers reload endpoint via curl POST
+- Intended to be run by cron
+
+**scripts/set_environment.in.sh:**
+- Template file configured by CMake
+- Exports environment variables for database management:
+  - `GEOIP_FILES` - Colon-separated list of database files
+  - `GEOIP_DATABASE_DIR` - Database directory path
+  - `GEOIP_UPDATE_TOOL_BIN` - Path to geoipupdate binary
+- Used by update script and deployment automation
 
 ## Component Configuration
 

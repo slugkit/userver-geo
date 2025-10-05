@@ -1,7 +1,7 @@
 #pragma once
 
 #include <slugkit/geo/context_config.hpp>
-#include <slugkit/geo/lookup_component_base.hpp>
+#include <slugkit/geo/lookup/lookup_component_base.hpp>
 
 #include <userver/server/middlewares/http_middleware_base.hpp>
 #include <userver/utils/fast_pimpl.hpp>

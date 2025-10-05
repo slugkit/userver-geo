@@ -1,22 +1,26 @@
-#include <slugkit/geo/maxmind_db_lookup.hpp>
+#include <slugkit/geo/lookup/maxmind_db_lookup.hpp>
 
 #include <userver/components/component_config.hpp>
 #include <userver/components/component_context.hpp>
+#include <userver/engine/shared_mutex.hpp>
 #include <userver/logging/log.hpp>
 #include <userver/yaml_config/merge_schemas.hpp>
 #include <userver/yaml_config/yaml_config.hpp>
 
 #include <maxminddb.h>
 
-namespace slugkit::geo {
+namespace slugkit::geo::lookup {
 
-struct MaxmindDbLookup::Impl {
+struct MaxmindDb::Impl {
+    mutable userver::engine::SharedMutex mutex_;
     std::string database_file_;
     MMDB_s database_;
+    std::string names_language_;
 
     Impl(const userver::components::ComponentConfig& config, const userver::components::ComponentContext& context)
         : database_file_(config["database-dir"].As<std::string>() + "/" + config["database-file"].As<std::string>())
-        , database_{} {
+        , database_{}
+        , names_language_(config["names-language"].As<std::string>("en")) {
         auto status = MMDB_open(database_file_.c_str(), MMDB_MODE_MMAP, &database_);
         if (status != MMDB_SUCCESS) {
             throw std::runtime_error("Failed to open database file: " + database_file_);
@@ -29,10 +33,25 @@ struct MaxmindDbLookup::Impl {
         }
     }
 
+    auto Reload() -> void {
+        LOG_INFO() << "Reloading MaxMind database from file: " << database_file_;
+        std::unique_lock lock(mutex_);
+        MMDB_s new_database = {};
+        auto status = MMDB_open(database_file_.c_str(), MMDB_MODE_MMAP, &new_database);
+        if (status != MMDB_SUCCESS) {
+            LOG_ERROR() << "Failed to open database file: " << database_file_;
+            return;
+        }
+        LOG_INFO() << "MaxMind database reloaded successfully";
+        MMDB_close(&database_);
+        std::swap(database_, new_database);
+    }
+
     auto Lookup(const std::string& ip_str) const -> std::optional<LookupResult> {
         if (ip_str.empty()) {
             return std::nullopt;
         }
+        std::shared_lock lock(mutex_);
         int gai_error = 0;
         int mmdb_error = 0;
         auto lookup_result = MMDB_lookup_string(&database_, ip_str.c_str(), &gai_error, &mmdb_error);
@@ -54,9 +73,9 @@ struct MaxmindDbLookup::Impl {
         MMDB_entry_data_s entry_data;
         MMDB_get_value(&lookup_result.entry, &entry_data, "country", "iso_code", nullptr);
         result.country_code = std::string(entry_data.utf8_string, entry_data.data_size);
-        MMDB_get_value(&lookup_result.entry, &entry_data, "country", "names", "en", nullptr);
+        MMDB_get_value(&lookup_result.entry, &entry_data, "country", "names", names_language_.c_str(), nullptr);
         result.country_name = std::string(entry_data.utf8_string, entry_data.data_size);
-        MMDB_get_value(&lookup_result.entry, &entry_data, "city", "names", "en", nullptr);
+        MMDB_get_value(&lookup_result.entry, &entry_data, "city", "names", names_language_.c_str(), nullptr);
         if (entry_data.has_data) {
             result.city_name = std::string(entry_data.utf8_string, entry_data.data_size);
         }
@@ -64,26 +83,38 @@ struct MaxmindDbLookup::Impl {
         if (entry_data.has_data) {
             result.time_zone = std::string(entry_data.utf8_string, entry_data.data_size);
         }
+        MMDB_get_value(&lookup_result.entry, &entry_data, "location", "latitude", nullptr);
+        if (entry_data.has_data) {
+            double latitude = entry_data.double_value;
+            MMDB_get_value(&lookup_result.entry, &entry_data, "location", "longitude", nullptr);
+            if (entry_data.has_data) {
+                result.coordinates = Coordinates{latitude, entry_data.double_value};
+            }
+        }
         return result;
     }
 };
 
-MaxmindDbLookup::MaxmindDbLookup(
+MaxmindDb::MaxmindDb(
     const userver::components::ComponentConfig& config,
     const userver::components::ComponentContext& context
 )
-    : LookupComponentBase(config, context)
+    : ComponentBase(config, context)
     , impl_{config, context} {
 }
 
-MaxmindDbLookup::~MaxmindDbLookup() = default;
+MaxmindDb::~MaxmindDb() = default;
 
-auto MaxmindDbLookup::Lookup(const std::string& ip_str) const -> std::optional<LookupResult> {
+auto MaxmindDb::Reload() -> void {
+    impl_->Reload();
+}
+
+auto MaxmindDb::Lookup(const std::string& ip_str) const -> std::optional<LookupResult> {
     return impl_->Lookup(ip_str);
 }
 
-auto MaxmindDbLookup::GetStaticConfigSchema() -> userver::yaml_config::Schema {
-    return userver::yaml_config::MergeSchemas<LookupComponentBase>(R"(
+auto MaxmindDb::GetStaticConfigSchema() -> userver::yaml_config::Schema {
+    return userver::yaml_config::MergeSchemas<ComponentBase>(R"(
 type: object
 description: MaxMind database lookup component
 additionalProperties: false
@@ -94,7 +125,11 @@ properties:
     database-file:
         type: string
         description: The name of the MaxMind database file
+    names-language:
+        type: string
+        description: The language for the names in the MaxMind database
+        default: en
 )");
 }
 
-}  // namespace slugkit::geo
+}  // namespace slugkit::geo::lookup
