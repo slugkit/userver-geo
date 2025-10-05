@@ -12,13 +12,15 @@
 namespace slugkit::geo::lookup {
 
 struct MaxmindDb::Impl {
+    mutable userver::engine::SharedMutex mutex_;
     std::string database_file_;
     MMDB_s database_;
-    mutable userver::engine::SharedMutex mutex_;
+    std::string names_language_;
 
     Impl(const userver::components::ComponentConfig& config, const userver::components::ComponentContext& context)
         : database_file_(config["database-dir"].As<std::string>() + "/" + config["database-file"].As<std::string>())
-        , database_{} {
+        , database_{}
+        , names_language_(config["names-language"].As<std::string>("en")) {
         auto status = MMDB_open(database_file_.c_str(), MMDB_MODE_MMAP, &database_);
         if (status != MMDB_SUCCESS) {
             throw std::runtime_error("Failed to open database file: " + database_file_);
@@ -41,6 +43,7 @@ struct MaxmindDb::Impl {
             return;
         }
         LOG_INFO() << "MaxMind database reloaded successfully";
+        MMDB_close(&database_);
         std::swap(database_, new_database);
     }
 
@@ -70,15 +73,23 @@ struct MaxmindDb::Impl {
         MMDB_entry_data_s entry_data;
         MMDB_get_value(&lookup_result.entry, &entry_data, "country", "iso_code", nullptr);
         result.country_code = std::string(entry_data.utf8_string, entry_data.data_size);
-        MMDB_get_value(&lookup_result.entry, &entry_data, "country", "names", "en", nullptr);
+        MMDB_get_value(&lookup_result.entry, &entry_data, "country", "names", names_language_.c_str(), nullptr);
         result.country_name = std::string(entry_data.utf8_string, entry_data.data_size);
-        MMDB_get_value(&lookup_result.entry, &entry_data, "city", "names", "en", nullptr);
+        MMDB_get_value(&lookup_result.entry, &entry_data, "city", "names", names_language_.c_str(), nullptr);
         if (entry_data.has_data) {
             result.city_name = std::string(entry_data.utf8_string, entry_data.data_size);
         }
         MMDB_get_value(&lookup_result.entry, &entry_data, "location", "time_zone", nullptr);
         if (entry_data.has_data) {
             result.time_zone = std::string(entry_data.utf8_string, entry_data.data_size);
+        }
+        MMDB_get_value(&lookup_result.entry, &entry_data, "location", "latitude", nullptr);
+        if (entry_data.has_data) {
+            double latitude = entry_data.double_value;
+            MMDB_get_value(&lookup_result.entry, &entry_data, "location", "longitude", nullptr);
+            if (entry_data.has_data) {
+                result.coordinates = Coordinates{latitude, entry_data.double_value};
+            }
         }
         return result;
     }
@@ -114,6 +125,10 @@ properties:
     database-file:
         type: string
         description: The name of the MaxMind database file
+    names-language:
+        type: string
+        description: The language for the names in the MaxMind database
+        default: en
 )");
 }
 

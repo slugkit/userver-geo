@@ -59,7 +59,6 @@ auto Parse(const Value& value, userver::formats::parse::To<LookupResult>) -> Loo
     if (value.HasMember("city_name")) {
         lookup_result.city_name = value["city_name"].template As<std::optional<std::string>>();
     }
-    return lookup_result;
     if (value.HasMember("time_zone")) {
         lookup_result.time_zone = value["time_zone"].template As<std::optional<std::string>>();
     }
