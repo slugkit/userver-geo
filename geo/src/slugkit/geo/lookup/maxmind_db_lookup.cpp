@@ -1,18 +1,20 @@
-#include <slugkit/geo/maxmind_db_lookup.hpp>
+#include <slugkit/geo/lookup/maxmind_db_lookup.hpp>
 
 #include <userver/components/component_config.hpp>
 #include <userver/components/component_context.hpp>
+#include <userver/engine/shared_mutex.hpp>
 #include <userver/logging/log.hpp>
 #include <userver/yaml_config/merge_schemas.hpp>
 #include <userver/yaml_config/yaml_config.hpp>
 
 #include <maxminddb.h>
 
-namespace slugkit::geo {
+namespace slugkit::geo::lookup {
 
-struct MaxmindDbLookup::Impl {
+struct MaxmindDb::Impl {
     std::string database_file_;
     MMDB_s database_;
+    mutable userver::engine::SharedMutex mutex_;
 
     Impl(const userver::components::ComponentConfig& config, const userver::components::ComponentContext& context)
         : database_file_(config["database-dir"].As<std::string>() + "/" + config["database-file"].As<std::string>())
@@ -29,10 +31,22 @@ struct MaxmindDbLookup::Impl {
         }
     }
 
+    auto Reload() -> void {
+        std::unique_lock lock(mutex_);
+        MMDB_s new_database = {};
+        auto status = MMDB_open(database_file_.c_str(), MMDB_MODE_MMAP, &new_database);
+        if (status != MMDB_SUCCESS) {
+            LOG_ERROR() << "Failed to open database file: " << database_file_;
+            return;
+        }
+        std::swap(database_, new_database);
+    }
+
     auto Lookup(const std::string& ip_str) const -> std::optional<LookupResult> {
         if (ip_str.empty()) {
             return std::nullopt;
         }
+        std::shared_lock lock(mutex_);
         int gai_error = 0;
         int mmdb_error = 0;
         auto lookup_result = MMDB_lookup_string(&database_, ip_str.c_str(), &gai_error, &mmdb_error);
@@ -68,22 +82,26 @@ struct MaxmindDbLookup::Impl {
     }
 };
 
-MaxmindDbLookup::MaxmindDbLookup(
+MaxmindDb::MaxmindDb(
     const userver::components::ComponentConfig& config,
     const userver::components::ComponentContext& context
 )
-    : LookupComponentBase(config, context)
+    : ComponentBase(config, context)
     , impl_{config, context} {
 }
 
-MaxmindDbLookup::~MaxmindDbLookup() = default;
+MaxmindDb::~MaxmindDb() = default;
 
-auto MaxmindDbLookup::Lookup(const std::string& ip_str) const -> std::optional<LookupResult> {
+auto MaxmindDb::Reload() -> void {
+    impl_->Reload();
+}
+
+auto MaxmindDb::Lookup(const std::string& ip_str) const -> std::optional<LookupResult> {
     return impl_->Lookup(ip_str);
 }
 
-auto MaxmindDbLookup::GetStaticConfigSchema() -> userver::yaml_config::Schema {
-    return userver::yaml_config::MergeSchemas<LookupComponentBase>(R"(
+auto MaxmindDb::GetStaticConfigSchema() -> userver::yaml_config::Schema {
+    return userver::yaml_config::MergeSchemas<ComponentBase>(R"(
 type: object
 description: MaxMind database lookup component
 additionalProperties: false
@@ -97,4 +115,4 @@ properties:
 )");
 }
 
-}  // namespace slugkit::geo
+}  // namespace slugkit::geo::lookup

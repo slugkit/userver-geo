@@ -89,13 +89,13 @@ public:
 
     GeoMiddleware(
         const GeoMiddlewareConfig& context_config,
-        std::vector<LookupComponentBase const*> geoip_resolvers,
+        std::vector<lookup::ComponentBase const*> geoip_resolvers,
         std::string ip_header,
         std::vector<TrustedNetwork> trusted_proxies,
         bool recursive
     )
         : context_config_(context_config)
-        , geoip_resolvers_(std::move(geoip_resolvers))
+        , resolvers_(std::move(geoip_resolvers))
         , ip_header_(std::move(ip_header))
         , trusted_proxies_(std::move(trusted_proxies))
         , recursive_(recursive) {
@@ -120,8 +120,8 @@ public:
     }
 
 private:
-    auto LookupIp(const std::string& ip_str) const -> std::optional<LookupResult> {
-        for (const auto resolver : geoip_resolvers_) {
+    auto LookupIp(const std::string& ip_str) const -> std::optional<lookup::LookupResult> {
+        for (const auto resolver : resolvers_) {
             auto lookup_result = resolver->Lookup(ip_str);
             if (lookup_result) {
                 LOG_INFO() << "Resolved IP: " << ip_str << " to " << lookup_result->country_code;
@@ -131,8 +131,8 @@ private:
         LOG_WARNING() << "Failed to resolve IP: " << ip_str;
         return std::nullopt;
     }
-    auto SetGeoHeaders(userver::server::request::RequestContext& context, const LookupResult& lookup_result) const
-        -> void {
+    auto SetGeoHeaders(userver::server::request::RequestContext& context, const lookup::LookupResult& lookup_result)
+        const -> void {
         context.SetData(context_config_.config.lookup_result_context, lookup_result);
         context.SetData(context_config_.config.country_code_context, lookup_result.country_code);
         context.SetData(context_config_.config.country_name_context, lookup_result.country_name);
@@ -143,7 +143,7 @@ private:
 
 private:
     const GeoMiddlewareConfig& context_config_;
-    std::vector<LookupComponentBase const*> geoip_resolvers_;
+    std::vector<lookup::ComponentBase const*> resolvers_;
     std::string ip_header_;
     std::vector<TrustedNetwork> trusted_proxies_;
     bool recursive_;
@@ -153,7 +153,7 @@ private:
 
 struct GeoMiddlewareFactory::Impl {
     const GeoMiddlewareConfig& context_config_;
-    std::vector<LookupComponentBase const*> geoip_resolvers_;
+    std::vector<lookup::ComponentBase const*> resolvers_;
     std::string ip_header_;
     std::vector<TrustedNetwork> trusted_proxies_;
     bool recursive_;
@@ -166,9 +166,9 @@ struct GeoMiddlewareFactory::Impl {
         , recursive_(config["recursive"].As<bool>(false)) {
         auto resolver_names = config["resolvers"].As<std::vector<std::string>>();
         for (const auto& resolver_name : resolver_names) {
-            geoip_resolvers_.push_back(&context.FindComponent<LookupComponentBase>(resolver_name));
+            resolvers_.push_back(&context.FindComponent<lookup::ComponentBase>(resolver_name));
         }
-        if (geoip_resolvers_.empty()) {
+        if (resolvers_.empty()) {
             throw std::runtime_error("No geoip resolvers provided");
         }
 
@@ -207,7 +207,7 @@ auto GeoMiddlewareFactory::Create(
     userver::yaml_config::YamlConfig middleware_config
 ) const -> std::unique_ptr<userver::server::middlewares::HttpMiddlewareBase> {
     return std::make_unique<GeoMiddleware>(
-        impl_->context_config_, impl_->geoip_resolvers_, impl_->ip_header_, impl_->trusted_proxies_, impl_->recursive_
+        impl_->context_config_, impl_->resolvers_, impl_->ip_header_, impl_->trusted_proxies_, impl_->recursive_
     );
 }
 
