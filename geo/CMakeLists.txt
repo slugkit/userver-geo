@@ -13,11 +13,17 @@ FetchContent_MakeAvailable(libmaxminddb)
 add_library(libmaxminddb ALIAS maxminddb)
 
 set(${PROJECT_NAME}_SRC
+    src/slugkit/geo/middleware.cpp
+    src/slugkit/geo/context_config.cpp
+
     src/slugkit/geo/maxmind_db_lookup.cpp
 )
 
 set(${PROJECT_NAME}_HEADERS
     include/slugkit/geo/lookup_component_base.hpp
+    include/slugkit/geo/context_config.hpp
+    include/slugkit/geo/middleware.hpp
+
     include/slugkit/geo/maxmind_db_lookup.hpp
 )
 

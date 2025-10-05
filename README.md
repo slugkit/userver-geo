@@ -25,7 +25,7 @@ components:
     database-file: GeoLite2-City.mmdb
 ```
 
-**Usage:**
+**Direct usage:**
 ```cpp
 auto& lookup = context.FindComponent<slugkit::geo::MaxmindDbLookup>();
 auto result = lookup.Lookup("8.8.8.8");
@@ -34,7 +34,65 @@ if (result) {
 }
 ```
 
-### Extensibility
+## Middleware
+
+The library provides HTTP middleware for automatic GeoIP resolution based on request IP addresses.
+
+### Setup
+
+**1. Configure context variable names (optional):**
+```yaml
+components:
+  geoip-middleware-config:
+    country_code_context: country_code
+    city_name_context: city_name
+    # ... other context variable names
+```
+
+**2. Configure middleware factory:**
+```yaml
+components:
+  geoip-middleware:
+    config-name: geoip-middleware-config  # optional
+    ip-header: x-real-ip                  # optional, default: x-real-ip
+    resolvers:
+      - maxmind-db-lookup
+      # - fallback-resolver  # Optional fallback chain
+
+server:
+  middlewares:
+    - geoip-middleware
+```
+
+### Using Geo Data in Handlers
+
+The middleware automatically sets request context variables:
+
+```cpp
+void MyHandler::HandleRequestThrow(
+    const userver::server::http::HttpRequest& request,
+    userver::server::request::RequestContext& context
+) const {
+    // Access individual fields
+    auto country_code = context.GetDataOptional<std::string>("country_code");
+    auto city_name = context.GetDataOptional<std::string>("city_name");
+
+    // Or access the full lookup result
+    auto lookup_result = context.GetDataOptional<slugkit::geo::LookupResult>("lookup_result");
+
+    if (lookup_result) {
+        // Use geo data...
+    }
+}
+```
+
+**Features:**
+- Supports multiple resolver components with automatic fallback
+- Configurable IP header extraction
+- Customisable context variable names
+- No handler code changes needed - data available via request context
+
+## Extensibility
 
 The `LookupComponentBase` abstract class allows implementing additional lookup strategies:
 - Online GeoIP services (IP-API, ipinfo.io, etc.)
@@ -42,4 +100,4 @@ The `LookupComponentBase` abstract class allows implementing additional lookup s
 - Caching layers
 - Fallback chains
 
-To implement a new lookup type, inherit from `LookupComponentBase` and implement the `Lookup()` method.
+To implement a new lookup type, inherit from `LookupComponentBase` and implement the `Lookup()` method. The middleware will automatically support it via the `resolvers` configuration.
