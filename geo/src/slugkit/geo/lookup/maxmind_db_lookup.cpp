@@ -128,7 +128,7 @@ properties:
     names-language:
         type: string
         description: The language for the names in the MaxMind database
-        default: en
+        defaultDescription: en
 )");
 }
 
